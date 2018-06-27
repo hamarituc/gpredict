@@ -70,8 +70,7 @@ struct _gtk_rig_ctrl {
     gboolean        engaged;    /*!< Flag indicating that rig device is engaged. */
     gint            errcnt;     /*!< Error counter. */
 
-    gboolean        lastrxptt;  /*!< PTT state of last rx cycle. */
-    gboolean        lasttxptt;  /*!< PTT state of last tx cycle. */
+    gboolean        lastptt;    /*!< PTT state of last cycle. */
 
     gdouble         lastrxf;    /*!< Last frequency sent to receiver. */
     gdouble         lasttxf;    /*!< Last frequency sent to tranmitter. */
