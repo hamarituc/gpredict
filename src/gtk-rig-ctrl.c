@@ -1,7 +1,7 @@
 /*
   Gpredict: Real-time satellite tracking and orbit prediction program
 
-  Copyright (C)  2001-2017  Alexandru Csete, OZ9AEC
+  Copyright (C)  2001-2019  Alexandru Csete, OZ9AEC
   Copyright (C)       2017  Patrick Dohmen, DL4PD
   Copyright (C)       2018  Mario Haustein, DM5AHA
 
@@ -119,6 +119,7 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
 
     if (ctrl->conf != NULL)
     {
+        radio_conf_save(ctrl->conf);
         g_free(ctrl->conf->name);
         g_free(ctrl->conf->host);
         g_free(ctrl->conf);
@@ -170,7 +171,8 @@ static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
     ctrl->delay = 1000;
     ctrl->timerid = 0;
     ctrl->errcnt = 0;
-    ctrl->lastptt = FALSE;
+    ctrl->lastrxptt = FALSE;
+    ctrl->lasttxptt = TRUE;
     ctrl->lastrxf = 0.0;
     ctrl->lasttxf = 0.0;
     ctrl->last_toggle_tx = -1;
@@ -413,6 +415,7 @@ void gtk_rig_ctrl_select_sat(GtkRigCtrl * ctrl, gint catnum)
 static void downlink_changed_cb(GtkFreqKnob * knob, gpointer data)
 {
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+
     (void)knob;
 
     if (ctrl->trsplock)
@@ -800,6 +803,8 @@ static void delay_changed_cb(GtkSpinButton * spin, gpointer data)
     GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
 
     ctrl->delay = (guint) gtk_spin_button_get_value(spin);
+    if (ctrl->conf)
+        ctrl->conf->cycle = ctrl->delay;
 
     if (ctrl->engaged)
         start_timer(ctrl);
@@ -837,6 +842,10 @@ static void primary_rig_selected_cb(GtkComboBox * box, gpointer data)
         sat_log_log(SAT_LOG_LEVEL_INFO,
                     _("%s:%s: Loaded new radio configuration %s"),
                     __FILE__, __func__, ctrl->conf->name);
+
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(ctrl->cycle_spin),
+                                  ctrl->conf->cycle);
+
         /* update LO widgets */
         buff = g_strdup_printf(_("%.0f MHz"), ctrl->conf->lo / 1.0e6);
         gtk_label_set_text(GTK_LABEL(ctrl->LoDown), buff);
@@ -1180,7 +1189,7 @@ static gint rig_name_compare(const gchar * a, const gchar * b)
 
 static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
 {
-    GtkWidget      *frame, *table, *label, *timer;
+    GtkWidget      *frame, *table, *label;
     GDir           *dir = NULL; /* directory handle */
     GError         *error = NULL;       /* error flag and info */
     gchar          *dirname;    /* directory name */
@@ -1254,7 +1263,6 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
     g_signal_connect(ctrl->DevSel, "changed",
                      G_CALLBACK(primary_rig_selected_cb), ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->DevSel, 1, 0, 1, 1);
-    /* config will be force-loaded after LO spin is created */
 
     /* Secondary device */
     label = gtk_label_new(_("2. Device:"));
@@ -1313,23 +1321,19 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
                      ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->LockBut, 2, 0, 1, 1);
 
-    /* Now, load config */
-    primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
-
-    /* Timeout */
+    /* cycle period */
     label = gtk_label_new(_("Cycle:"));
     g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
     gtk_grid_attach(GTK_GRID(table), label, 0, 3, 1, 1);
 
-    timer = gtk_spin_button_new_with_range(100, 5000, 10);
-    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(timer), 0);
-    gtk_widget_set_tooltip_text(timer,
+    ctrl->cycle_spin = gtk_spin_button_new_with_range(10, 10000, 10);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(ctrl->cycle_spin), 0);
+    gtk_widget_set_tooltip_text(ctrl->cycle_spin,
                                 _("This parameter controls the delay between "
                                   "commands sent to the rig."));
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(timer), ctrl->delay);
-    g_signal_connect(timer, "value-changed", G_CALLBACK(delay_changed_cb),
-                     ctrl);
-    gtk_grid_attach(GTK_GRID(table), timer, 1, 3, 1, 1);
+    g_signal_connect(ctrl->cycle_spin, "value-changed",
+                     G_CALLBACK(delay_changed_cb), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->cycle_spin, 1, 3, 1, 1);
 
     label = gtk_label_new(_("msec"));
     g_object_set(label, "xalign", 0.0f, "yalign", 0.5f, NULL);
@@ -1337,6 +1341,9 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
 
     frame = gtk_frame_new(_("Settings"));
     gtk_container_add(GTK_CONTAINER(frame), table);
+
+    /* load primary config */
+    primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
 
     return frame;
 }
@@ -1374,22 +1381,17 @@ static void store_sats(gpointer key, gpointer value, gpointer user_data)
     (void)key;
 
     ctrl->sats = g_slist_insert_sorted(ctrl->sats, sat,
-                                      (GCompareFunc) sat_name_compare);
+                                       (GCompareFunc) sat_name_compare);
 }
 
-static gboolean _send_rigctld_command(GtkRigCtrl * ctrl, gint sock, gchar * buff,
-                                      gchar * buffout, gint sizeout)
+static gboolean _send_rigctld_command(GtkRigCtrl * ctrl, gint sock,
+                                      gchar * buff, gchar * buffout,
+                                      gint sizeout)
 {
     gint            written;
     gint            size;
 
-    /* added by Marcel Cimander; win32 newline -> \10\13 */
-#ifdef WIN32
-    size = strlen(buff) - 1;
-    /* added by Marcel Cimander; unix newline -> \10 (apple -> \13) */
-#else
     size = strlen(buff);
-#endif
 
     sat_log_log(SAT_LOG_LEVEL_DEBUG,
                 _("%s:%s: sending %d bytes to rigctld as \"%s\""),
@@ -1433,10 +1435,11 @@ static gboolean _send_rigctld_command(GtkRigCtrl * ctrl, gint sock, gchar * buff
     return TRUE;
 }
 
-static gboolean send_rigctld_command(GtkRigCtrl * ctrl, gint sock, gchar * buff,
-                                      gchar * buffout, gint sizeout)
+static gboolean send_rigctld_command(GtkRigCtrl * ctrl, gint sock,
+                                     gchar * buff, gchar * buffout,
+                                     gint sizeout)
 {
-    gboolean retval;
+    gboolean        retval;
 
     /* Enter critical section! */
     g_mutex_lock(&ctrl->writelock);
@@ -1710,6 +1713,11 @@ static void update_freq(GtkRigCtrl * ctrl, gint sock, gdouble *lastf, gdouble tm
             ctrl->errcnt++;
         }
     }
+
+    /* Remember PTT state, to avoid misinterpreting VFO changes as dial
+       feedback during RX to TX transitions.
+     */
+    ctrl->lasttxptt = ptt;
 }
 
 static void exec_rx_cycle(GtkRigCtrl * ctrl)
@@ -2600,8 +2608,7 @@ GtkWidget      *gtk_rig_ctrl_new(GtkSatModule * module)
                     1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(table), create_target_widgets(rigctrl),
                     0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(table), create_conf_widgets(rigctrl),
-                    1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(table), create_conf_widgets(rigctrl), 1, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(table), create_count_down_widgets(rigctrl),
                     0, 2, 2, 1);
 
