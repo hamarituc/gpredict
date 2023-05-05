@@ -69,8 +69,11 @@
 
 static GtkVBoxClass *parent_class = NULL;
 
-static void gtk_sky_glance_init(GtkSkyGlance * skg)
+static void gtk_sky_glance_init(GtkSkyGlance * skg,
+	gpointer g_class)
 {
+    (void)g_class;
+
     skg->sats = NULL;
     skg->qth = NULL;
     skg->passes = NULL;
@@ -147,9 +150,12 @@ static void gtk_sky_glance_destroy(GtkWidget * widget)
 }
 
 
-static void gtk_sky_glance_class_init(GtkSkyGlanceClass * class)
+static void gtk_sky_glance_class_init(GtkSkyGlanceClass * class,
+				      gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     widget_class->destroy = gtk_sky_glance_destroy;
@@ -765,7 +771,7 @@ static void create_sat(gpointer key, gpointer value, gpointer data)
 /**
  * Create a new GtkSkyGlance widget.
  *
- * @param sats Pointer to the hash table containing the asociated satellites.
+ * @param sats Pointer to the hash table containing the associated satellites.
  * @param qth Pointer to the ground station data.
  * @param ts The t0 for the timeline or 0 to use the current date and time.
  */

@@ -396,10 +396,10 @@ void tle_update_from_files(const gchar * dir, const gchar * filter,
             /* store time of update if we have updated something */
             if ((updated > 0) || (newsats > 0))
             {
-                GTimeVal        tval;
+		gint64          now;
 
-                g_get_current_time(&tval);
-                sat_cfg_set_int(SAT_CFG_INT_TLE_LAST_UPDATE, tval.tv_sec);
+		now = g_get_real_time() / G_USEC_PER_SEC;
+                sat_cfg_set_int(SAT_CFG_INT_TLE_LAST_UPDATE, now);
             }
         }
 
@@ -493,7 +493,7 @@ void tle_update_from_network(gboolean silent,
     const gchar    *fname;
     gchar          *text;
     GError         *err = NULL;
-    guint           success = 0;        /* no. of successfull downloads */
+    guint           success = 0;        /* no. of successful downloads */
 
     /* bail out if we are already in an update process */
     if (g_mutex_trylock(&tle_in_progress) == FALSE)
@@ -598,6 +598,7 @@ void tle_update_from_network(gboolean silent,
 #else
                 curl_easy_setopt(curl, CURLOPT_WRITEDATA, outfile);
                 curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, my_write_func);
+                curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
                 /* get file */
                 res = curl_easy_perform(curl);
@@ -799,7 +800,7 @@ static gint read_fresh_tle(const gchar * dir, const gchar * fnam,
 
     /* 
        Normal cases to check
-       1. 3 line tle file as in amatuer.txt from celestrak
+       1. 3 line tle file as in amateur.txt from celestrak
        2. 2 line tle file as in .... from celestrak
 
        corner cases to check 
@@ -1266,7 +1267,7 @@ static void update_tle_in_file(const gchar * ldname,
 
             if (ntle->satname != NULL)
             {
-                /* when a satellite first appears in the elements it is sometimes refered to by the 
+                /* when a satellite first appears in the elements it is sometimes referred to by the 
                    international designator which is awkward after it is given a name */
                 if (!is_computer_generated_name(ntle->satname))
                 {

@@ -142,17 +142,23 @@ static void gtk_rig_ctrl_destroy(GtkWidget * widget)
     (*GTK_WIDGET_CLASS(parent_class)->destroy) (widget);
 }
 
-static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class)
+static void gtk_rig_ctrl_class_init(GtkRigCtrlClass * class,
+				    gpointer class_data)
 {
     GtkWidgetClass *widget_class;
+
+    (void)class_data;
 
     widget_class = (GtkWidgetClass *) class;
     parent_class = g_type_class_peek_parent(class);
     widget_class->destroy = gtk_rig_ctrl_destroy;
 }
 
-static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl)
+static void gtk_rig_ctrl_init(GtkRigCtrl * ctrl,
+			      gpointer g_class)
 {
+    (void)g_class;
+
     ctrl->sats = NULL;
     ctrl->target = NULL;
     ctrl->pass = NULL;
@@ -349,7 +355,7 @@ static void track_downlink(GtkRigCtrl * ctrl)
     if (ctrl->trsp == NULL)
         return;
 
-    /* ensure that we have a useable transponder config */
+    /* ensure that we have a usable transponder config */
     if ((ctrl->trsp->downlow > 0) && (ctrl->trsp->uplow > 0))
     {
         down = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqDown));
@@ -375,7 +381,7 @@ static void track_uplink(GtkRigCtrl * ctrl)
     if (ctrl->trsp == NULL)
         return;
 
-    /* ensure that we have a useable transponder config */
+    /* ensure that we have a usable transponder config */
     if ((ctrl->trsp->downlow > 0) && (ctrl->trsp->uplow > 0))
     {
         up = gtk_freq_knob_get_value(GTK_FREQ_KNOB(ctrl->SatFreqUp));
@@ -1793,19 +1799,19 @@ static void exec_toggle_cycle(GtkRigCtrl * ctrl)
      */
     if (ctrl->conf->type == RIG_TYPE_TOGGLE_AUTO)
     {
-        GTimeVal        current_time;
+	gint64          current_time;
 
         /* get the current time */
-        g_get_current_time(&current_time);
+	current_time = g_get_real_time() / G_USEC_PER_SEC;
 
         if ((ctrl->last_toggle_tx == -1) ||
-            ((current_time.tv_sec - ctrl->last_toggle_tx) >= 10))
+            ((current_time - ctrl->last_toggle_tx) >= 10))
         {
             /* it's time to update TX freq */
             exec_toggle_tx_cycle(ctrl);
 
             /* store current time */
-            ctrl->last_toggle_tx = current_time.tv_sec;
+            ctrl->last_toggle_tx = current_time;
         }
     }
 }
@@ -1962,7 +1968,7 @@ static gboolean set_ptt(GtkRigCtrl * ctrl, gint sock, gboolean ptt)
  *         occurred.
  *
  * This function checks whether AOS or LOS just happened and sends the
- * apropriate signal to the RIG if this signalling is enabled.
+ * appropriate signal to the RIG if this signalling is enabled.
  */
 static gboolean check_aos_los(GtkRigCtrl * ctrl)
 {
@@ -2174,7 +2180,7 @@ static gboolean get_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble * freq)
  * TRUE (on). If PTT status is TRUE (on) it will simply set the PTT to FALSE
  * (off).
  *
- * This function assumes that the radio supprot set/get PTT, otherwise it makes
+ * This function assumes that the radio support set/get PTT, otherwise it makes
  * no sense to use it!
  */
 static void manage_ptt_event(GtkRigCtrl * ctrl)
